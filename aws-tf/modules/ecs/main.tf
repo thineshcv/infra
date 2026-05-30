@@ -9,41 +9,51 @@ resource "aws_ecs_cluster" "this" {
   tags = var.tags
 }
 
-resource "aws_cloudwatch_log_group" "ecs" {
-  name              = "/ecs/${var.service_name}"
+# --- Per-service resources ---
+
+resource "aws_cloudwatch_log_group" "services" {
+  for_each = var.services
+
+  name              = "/ecs/${each.key}"
   retention_in_days = 7
   tags              = var.tags
 }
 
-resource "aws_ecs_task_definition" "this" {
-  family                   = var.service_name
+resource "aws_ecs_task_definition" "services" {
+  for_each = var.services
+
+  family                   = each.key
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.task_cpu
-  memory                   = var.task_memory
+  cpu                      = each.value.task_cpu
+  memory                   = each.value.task_memory
   execution_role_arn       = aws_iam_role.ecs_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
   container_definitions = jsonencode([
     {
-      name      = var.container_name
-      image     = var.container_image
-      cpu       = var.task_cpu
-      memory    = var.task_memory
+      name      = each.value.container_name
+      image     = each.value.container_image
+      cpu       = each.value.task_cpu
+      memory    = each.value.task_memory
       essential = true
 
       portMappings = [
         {
-          containerPort = var.container_port
-          hostPort      = var.container_port
+          containerPort = each.value.container_port
+          hostPort      = each.value.container_port
           protocol      = "tcp"
         }
       ]
 
+      environment = [for k, v in each.value.environment : { name = k, value = v }]
+
+      secrets = [for k, v in each.value.secrets : { name = k, valueFrom = v }]
+
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
+          "awslogs-group"         = aws_cloudwatch_log_group.services[each.key].name
           "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "ecs"
         }
@@ -54,11 +64,13 @@ resource "aws_ecs_task_definition" "this" {
   tags = var.tags
 }
 
-resource "aws_ecs_service" "this" {
-  name            = var.service_name
+resource "aws_ecs_service" "services" {
+  for_each = var.services
+
+  name            = each.key
   cluster         = aws_ecs_cluster.this.id
-  task_definition = aws_ecs_task_definition.this.arn
-  desired_count   = var.desired_count
+  task_definition = aws_ecs_task_definition.services[each.key].arn
+  desired_count   = each.value.desired_count
   launch_type     = "FARGATE"
 
   network_configuration {
@@ -67,10 +79,13 @@ resource "aws_ecs_service" "this" {
     assign_public_ip = false
   }
 
-  load_balancer {
-    target_group_arn = var.target_group_arn
-    container_name   = var.container_name
-    container_port   = var.container_port
+  dynamic "load_balancer" {
+    for_each = each.value.target_group_arns
+    content {
+      target_group_arn = load_balancer.value
+      container_name   = each.value.container_name
+      container_port   = each.value.container_port
+    }
   }
 
   depends_on = [aws_iam_role_policy_attachment.ecs_execution]

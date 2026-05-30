@@ -3,45 +3,28 @@ variable "cluster_name" {
   description = "Name of the ECS cluster"
 }
 
-variable "service_name" {
-  type        = string
-  description = "Name of the ECS service"
-}
-
-variable "container_name" {
-  type        = string
-  description = "Name of the container"
-  default     = "app"
-}
-
-variable "container_image" {
-  type        = string
-  description = "Docker image to run (e.g. nginx:latest)"
-  default     = "nginx:latest"
-}
-
-variable "container_port" {
-  type        = number
-  description = "Port the container listens on"
-  default     = 80
-}
-
-variable "task_cpu" {
-  type        = number
-  description = "CPU units for the task (256 = 0.25 vCPU)"
-  default     = 256
-}
-
-variable "task_memory" {
-  type        = number
-  description = "Memory in MiB for the task"
-  default     = 512
-}
-
-variable "desired_count" {
-  type        = number
-  description = "Number of task instances"
-  default     = 2
+variable "services" {
+  type = map(object({
+    container_name        = string
+    container_image       = string
+    container_port        = number
+    task_cpu              = number
+    task_memory           = number
+    desired_count         = number
+    target_group_arns     = list(string)
+    environment           = optional(map(string), {})
+    secrets               = optional(map(string), {})
+    autoscaling_min       = optional(number, 1)
+    autoscaling_max       = optional(number, 5)
+    cpu_target_percentage = optional(number, 70)
+  }))
+  description = <<-EOT
+    Map of ECS services to create on the shared cluster.
+    Each key becomes the service / task-definition name.
+    `target_group_arns` can contain ARNs from both external and internal ALBs.
+    `environment` is an optional map of env vars injected into the container.
+    `secrets` is an optional map of env-var-name → SSM/SecretsManager ARN, injected at container start.
+  EOT
 }
 
 variable "vpc_id" {
@@ -54,14 +37,9 @@ variable "private_subnet_ids" {
   description = "Private subnet IDs where Fargate tasks run"
 }
 
-variable "target_group_arn" {
-  type        = string
-  description = "ARN of the ALB target group to register tasks with"
-}
-
-variable "alb_security_group_id" {
-  type        = string
-  description = "Security group ID of the ALB (for ingress rules)"
+variable "alb_security_group_ids" {
+  type        = list(string)
+  description = "Security group IDs of all ALBs (external + internal) that send traffic to ECS tasks"
 }
 
 variable "aws_region" {
